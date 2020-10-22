@@ -12,17 +12,18 @@
 
 using namespace std;
 #define NUM_THREADS 10
+size_t limit = 2; 
 mutex mu;
 
 typedef struct {
-    char* line;
+    char** line;
+    size_t limit;
 } Param;
 
 double array[NUM_THREADS];
-Param p_obj[NUM_THREADS];
+Param param_obj[NUM_THREADS];
 
 void str_to_json(char* line){
-    mu.lock();
     size_t ln = strlen(line) - 1;
     if (*line && line[ln] == '\n') 
         line[ln] = '\0';
@@ -38,32 +39,18 @@ void str_to_json(char* line){
         token = strtok(NULL, "|"); 
     } 
     assert(index == 21);
-    mu.unlock();
-}
-
-void str_to_json(char* line, FILE** out_file){
-    size_t ln = strlen(line) - 1;
-    if (*line && line[ln] == '\n') 
-        line[ln] = '\0';
-
-    fprintf (*out_file, "{");
-    int index = 1;
-    char* token = strtok(line, "|"); 
-    
-    while (token != NULL) { 
-        if(index != 20)
-            fprintf(*out_file, "\"col_%d\":\"%s\",\n", index++, token); 
-        else
-            fprintf(*out_file, "\"col_%d\":\"%s\"\n", index++, token); 
-        token = strtok(NULL, "|"); 
-    } 
-    assert(index == 21);
-    fprintf (*out_file, "}");
 }
 
 void *threaded_task(void *param) {
     Param* p = (Param*) param;
-    str_to_json(p->line);
+    mu.lock();
+
+    for(size_t i=0;i<p->limit;i++){
+        printf("%s\n", p->line[i]);
+        // str_to_json(p->line[i++]);
+    }
+    mu.unlock();
+
     pthread_exit((void *)param);
 }
 
@@ -77,34 +64,48 @@ int main() {
     pthread_attr_t attr;
     pthread_t thread[NUM_THREADS];
     int rc;
-    long t=0;
+    size_t t=0;
     void *status;
 
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
     
-    // fprintf (out_file, "[");
-
+    size_t limit_ctr = 0;
+    bool new_obj = true;
+    size_t thread_in_use = 0;
     while (fgets(line, sizeof(line), in_file)) {
-        printf("Creating thread %ld\n", t);
-        p_obj[t].line = (char*)malloc(1024*(sizeof(char)));
-        strcpy(p_obj[t].line, line);
-        rc = pthread_create(&thread[t], &attr, threaded_task, (void *)&p_obj[t]);
-        if (rc) {
-            printf("ERROR: return code from pthread_create() is %d\n", rc);
-            exit(-1);
+        if(new_obj){
+            param_obj[t].line = new char* [limit];
+            param_obj[t].limit = limit;
+            new_obj = false;
         }
-        t++;
+        param_obj[t].line[limit_ctr] = (char*)malloc(1024*(sizeof(char)));
+        strcpy(param_obj[t].line[limit_ctr], line);
+        
+        if(limit_ctr == limit - 1){
+            rc = pthread_create(&thread[t], &attr, threaded_task, (void *)&param_obj[t]);
+            if (rc) {
+                printf("ERROR: return code from pthread_create() is %d\n", rc);
+                exit(-1);
+            }
+            thread_in_use++;
+            limit_ctr = -1;
+            new_obj = true;
+            t++;
+        }
+
+        limit_ctr++;
     }
     pthread_attr_destroy(&attr);
-    for (t = 0; t < NUM_THREADS; t++) {
+    for (t = 0; t < thread_in_use; t++) {
         rc = pthread_join(thread[t], &status);
         if (rc) {
             printf("ERROR; return code from pthread_join() is %d\n", rc);
             exit(-1);
         }
     }
+    thread_in_use = 0;
 
 
     // fprintf (out_file, "]");
