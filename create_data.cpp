@@ -16,12 +16,13 @@ int main(int argc, char* argv[]) {
     default_random_engine gen = default_random_engine(rd());
     uniform_int_distribution<int> dis(-1000, 1000);
     fstream file;
-    file.open("input.txt", ios::out);
+    file.open("input.csv", ios::out);
+
 
     if (file.fail()) {
         cout << "Can't open file" << endl;
     } else {
-        for (int i = 0; i < atoi(argv[1]); ++i) {
+        for (long long i = 0; i < atoi(argv[1]); ++i) {
             file << i;
             for(int j=0;j<19;j++)
                 file<<"|" << dis(gen);

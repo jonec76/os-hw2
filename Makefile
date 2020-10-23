@@ -5,5 +5,7 @@ CFLAGS=-Wall -O2 -pthread
 
 main:main.cpp
 	$(CC) -o $@ $< $(CFLAGS)
+create_data:create_data.cpp
+	$(CC) -o $@ $< 
 clean:
 	rm *.o

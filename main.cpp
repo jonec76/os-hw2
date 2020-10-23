@@ -11,19 +11,17 @@
 #include <mutex>
 
 using namespace std;
-#define NUM_THREADS 10
-size_t limit = 2; 
+#define NUM_THREADS 3
+size_t limit = 7; 
 mutex mu;
 
 typedef struct {
     char** line;
-    size_t limit;
+    char* result;
+    size_t limit_set;
 } Param;
 
-double array[NUM_THREADS];
-Param param_obj[NUM_THREADS];
-
-void str_to_json(char* line){
+void str_to_json(char** result, char* line){
     size_t ln = strlen(line) - 1;
     if (*line && line[ln] == '\n') 
         line[ln] = '\0';
@@ -32,35 +30,56 @@ void str_to_json(char* line){
     char* token = strtok(line, "|"); 
     
     while (token != NULL) { 
-        if(index != 20)
-            printf("\"col_%d\":\"%s\",\n", index++, token); 
-        else
-            printf("\"col_%d\":\"%s\"\n", index++, token); 
+        if(index != 20){
+            char tmp[64];
+            sprintf(tmp, "\"col_%d\":\"%s\",\n", index++, token);
+            strcat(*result, tmp); 
+        }
+        else{
+            char tmp[64];
+            sprintf(tmp, "\"col_%d\":\"%s\"\n", index++, token); 
+            strcat(*result, tmp); 
+        }
         token = strtok(NULL, "|"); 
     } 
     assert(index == 21);
 }
 
 void *threaded_task(void *param) {
-    Param* p = (Param*) param;
     mu.lock();
+    Param* p = (Param*) param;
 
-    for(size_t i=0;i<p->limit;i++){
-        printf("%s\n", p->line[i]);
-        // str_to_json(p->line[i++]);
+    // 20 lines * 64 = 1 set
+    p->result = (char*) malloc(p->limit_set * 20 * 64);
+    for(size_t i=0;i<p->limit_set;i++){
+        strcat(p->result, "{\n");
+        str_to_json(&p->result, p->line[i]);
+        strcat(p->result, "},");
     }
     mu.unlock();
 
     pthread_exit((void *)param);
 }
 
+// TODO: while loop when threads are less than the number of sets wait to be handled.
 int main() {
+    const clock_t begin_time = clock();
     char const* const input_file = "input.csv"; 
     char const* const output_file = "output.json"; 
-    FILE* in_file = fopen(input_file, "r"); 
-    FILE* out_file = fopen(output_file, "w"); 
-    char line[1024];
+    FILE* in_fp = fopen(input_file, "r"); 
+    if (in_fp == NULL) {
+        printf("Error! in_fp");
+        exit(1);
+    }  
+    FILE *out_fp;
+    out_fp = fopen(output_file, "w");
+    if (out_fp == NULL) {
+        printf("Error! out_fp");
+        exit(1);
+    }  
 
+    char line[1024];
+    Param param_obj[NUM_THREADS];
     pthread_attr_t attr;
     pthread_t thread[NUM_THREADS];
     int rc;
@@ -69,21 +88,24 @@ int main() {
 
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
     
     size_t limit_ctr = 0;
     bool new_obj = true;
+    bool new_thread_set = true;
     size_t thread_in_use = 0;
-    while (fgets(line, sizeof(line), in_file)) {
+    
+    fprintf(out_fp, "[");
+
+    while (fgets(line, sizeof(line), in_fp)) {
+        assert(t < NUM_THREADS);
         if(new_obj){
             param_obj[t].line = new char* [limit];
-            param_obj[t].limit = limit;
             new_obj = false;
         }
         param_obj[t].line[limit_ctr] = (char*)malloc(1024*(sizeof(char)));
         strcpy(param_obj[t].line[limit_ctr], line);
-        
         if(limit_ctr == limit - 1){
+            param_obj[t].limit_set = limit;
             rc = pthread_create(&thread[t], &attr, threaded_task, (void *)&param_obj[t]);
             if (rc) {
                 printf("ERROR: return code from pthread_create() is %d\n", rc);
@@ -94,21 +116,80 @@ int main() {
             new_obj = true;
             t++;
         }
-
         limit_ctr++;
+
+        if(thread_in_use == NUM_THREADS){
+            new_thread_set = true;
+            for (t = 0; t < thread_in_use; t++) {
+                rc = pthread_join(thread[t], &status);
+                if (rc) {
+                    printf("ERROR; return code from pthread_join() is %d\n", rc);
+                    exit(-1);
+                }
+                fprintf(out_fp, "%s", ((Param*)status)->result);
+            }
+            // Handle the last remain datas which don't meet the limit. 
+            if(!new_obj){
+                param_obj[t].limit_set = limit_ctr;
+                rc = pthread_create(&thread[t], &attr, threaded_task, (void *)&param_obj[t]);
+                if (rc) {
+                    printf("ERROR: return code from pthread_create() is %d\n", rc);
+                    exit(-1);
+                }
+                rc = pthread_join(thread[t], &status);
+                if (rc) {
+                    printf("ERROR; return code from pthread_join() is %d\n", rc);
+                    exit(-1);
+                }
+                fprintf(out_fp, "%s", ((Param*)status)->result);
+            }
+            pthread_attr_destroy(&attr);
+            thread_in_use = 0;
+            limit_ctr = 0;
+            new_obj = true;
+            thread_in_use = 0;
+            t = 0;
+        }
     }
-    pthread_attr_destroy(&attr);
-    for (t = 0; t < thread_in_use; t++) {
+
+    if(thread_in_use != NUM_THREADS){
+        for (size_t j = 0; j < thread_in_use; j++) {
+            rc = pthread_join(thread[j], &status);
+            if (rc) {
+                printf("ERROR; return code from pthread_join() is %d\n", rc);
+                exit(-1);
+            }
+            fprintf(out_fp, "%s", ((Param*)status)->result);
+        }
+    }
+    if(!new_obj){
+
+        param_obj[t].limit_set = limit_ctr;
+        rc = pthread_create(&thread[t], &attr, threaded_task, (void *)&param_obj[t]);
+        if (rc) {
+            printf("ERROR: return code from pthread_create() is %d\n", rc);
+            exit(-1);
+        }
         rc = pthread_join(thread[t], &status);
         if (rc) {
             printf("ERROR; return code from pthread_join() is %d\n", rc);
             exit(-1);
         }
+        fprintf(out_fp, "%s", ((Param*)status)->result);
     }
-    thread_in_use = 0;
+    
+    for(size_t i=0;i<NUM_THREADS;i++){
+        free(param_obj[i].result);
+        for(size_t j=0;j<limit;j++)
+            free(param_obj[i].line[j]);
+    }
 
+    // For remove the redundant last comma
+    size_t pos = ftell(out_fp);
+    fseek( out_fp, pos-1, SEEK_SET );
+    fprintf(out_fp, "]");
 
-    // fprintf (out_file, "]");
-    fclose(in_file);
-    fclose(out_file);
+    fclose(in_fp);
+    fclose(out_fp);
+    cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC;
 }
