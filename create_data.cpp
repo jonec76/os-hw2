@@ -4,6 +4,8 @@
 
 using namespace std;
 
+
+// argv[1] = 11500000 for generating about 1G
 int main(int argc, char* argv[]) {
     if (argc != 2)
         printf("Wrong parameters for create_data");

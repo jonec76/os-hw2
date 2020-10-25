@@ -11,8 +11,7 @@
 #include <mutex>
 
 using namespace std;
-#define NUM_THREADS 3
-size_t limit = 7; 
+size_t limit = 50; 
 mutex mu;
 
 typedef struct {
@@ -61,11 +60,18 @@ void *threaded_task(void *param) {
     pthread_exit((void *)param);
 }
 
-// TODO: while loop when threads are less than the number of sets wait to be handled.
-int main() {
+int main(int argc, char* argv[]) {
+
     const clock_t begin_time = clock();
     char const* const input_file = "input.csv"; 
-    char const* const output_file = "output.json"; 
+    char const* const output_file = "output.json";
+
+    assert(argc == 2);
+    size_t NUM_THREADS = atoi(argv[1]);
+    assert(NUM_THREADS > 0);
+
+    cout<<"Thread num: "<<argv[1]<<endl;
+
     FILE* in_fp = fopen(input_file, "r"); 
     if (in_fp == NULL) {
         printf("Error! in_fp");
@@ -91,11 +97,10 @@ int main() {
     
     size_t limit_ctr = 0;
     bool new_obj = true;
-    bool new_thread_set = true;
     size_t thread_in_use = 0;
-    
-    fprintf(out_fp, "[");
 
+    // convert now to string form
+    fprintf(out_fp, "[");
     while (fgets(line, sizeof(line), in_fp)) {
         assert(t < NUM_THREADS);
         if(new_obj){
@@ -119,7 +124,6 @@ int main() {
         limit_ctr++;
 
         if(thread_in_use == NUM_THREADS){
-            new_thread_set = true;
             for (t = 0; t < thread_in_use; t++) {
                 rc = pthread_join(thread[t], &status);
                 if (rc) {
@@ -191,5 +195,5 @@ int main() {
 
     fclose(in_fp);
     fclose(out_fp);
-    cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC;
+    cout <<"Total time: "<< float( clock () - begin_time ) /  CLOCKS_PER_SEC <<" s";
 }
