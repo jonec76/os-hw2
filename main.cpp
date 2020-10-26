@@ -65,7 +65,6 @@ int main(int argc, char* argv[]) {
     const clock_t begin_time = clock();
     char const* const input_file = "input.csv"; 
     char const* const output_file = "output.json";
-
     assert(argc == 2);
     size_t NUM_THREADS = atoi(argv[1]);
     assert(NUM_THREADS > 0);
@@ -94,7 +93,7 @@ int main(int argc, char* argv[]) {
 
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-    
+
     size_t limit_ctr = 0;
     bool new_obj = true;
     size_t thread_in_use = 0;
@@ -131,6 +130,9 @@ int main(int argc, char* argv[]) {
                     exit(-1);
                 }
                 fprintf(out_fp, "%s", ((Param*)status)->result);
+                for(size_t j=0;j<param_obj[t].limit_set;j++){
+                    free(param_obj[t].line[j]);
+                }
             }
             // Handle the last remain datas which don't meet the limit. 
             if(!new_obj){
@@ -184,8 +186,8 @@ int main(int argc, char* argv[]) {
     
     for(size_t i=0;i<NUM_THREADS;i++){
         free(param_obj[i].result);
-        for(size_t j=0;j<limit;j++)
-            free(param_obj[i].line[j]);
+        // for(size_t j=0;j<limit;j++)
+        //     free(param_obj[i].line[j]);
     }
 
     // For remove the redundant last comma
