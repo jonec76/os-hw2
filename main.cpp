@@ -66,6 +66,14 @@ void get_fp(FILE** fp, const char* name , const char* mode){
     }  
 }
 
+void inin_thread_obj(Param* param_obj, int thread_num){
+    for(int i=0;i<thread_num;i++){
+        param_obj[i].line = new char* [line_per_thread];
+        for(size_t j=0;j<line_per_thread;j++)
+            param_obj[i].line[j] = (char*)malloc(1024*(sizeof(char)));
+    }
+}
+
 int main(int argc, char* argv[]) {
     const clock_t begin_time = clock();
     assert(argc == 2);
@@ -94,14 +102,11 @@ int main(int argc, char* argv[]) {
 
     // convert now to string form
     fprintf(out_fp, "[");
+
+    inin_thread_obj(param_obj, thread_num);
+
     while (fgets(line, sizeof(line), in_fp)) {
         assert(thread_idx < thread_num);
-        if(new_obj){
-            param_obj[thread_idx].line = new char* [line_per_thread];
-            for(size_t i=0;i<line_per_thread;i++)
-                param_obj[thread_idx].line[i] = (char*)malloc(1024*(sizeof(char)));
-            new_obj = false;
-        }
         strcpy(param_obj[thread_idx].line[line_idx], line);
         line_idx++;
         if(line_idx == line_per_thread){
@@ -124,9 +129,6 @@ int main(int argc, char* argv[]) {
                     exit(-1);
                 }
                 fprintf(out_fp, "%s", ((Param*)status)->result);
-                for(size_t j=0;j<param_obj[t].limit_set;j++){
-                    free(param_obj[t].line[j]);
-                }
             }
             // Handle the last remain datas which don'thread_idx meet the line_per_thread. 
             if(!new_obj){
