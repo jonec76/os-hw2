@@ -9,16 +9,19 @@
 #include <math.h>
 #include <pthread.h>
 #include <mutex>
+#define line_size 1024
+#define max_line_per_thread 40
 
 using namespace std;
-size_t line_per_thread = 50;
-size_t word_per_line = 20; 
+
+const size_t word_per_line = 20; 
+
 mutex mu;
 
 typedef struct {
     char** line;
     char* result;
-    size_t limit_set;
+    size_t line_per_thread;
 } Param;
 
 void str_to_json(char** result, char* line){
@@ -47,8 +50,8 @@ void *threaded_task(void *param) {
     Param* p = (Param*) param;
 
     // size: 20 lines * 64 words
-    p->result = (char*) malloc(p->limit_set * word_per_line * 64);
-    for(size_t i=0;i<p->limit_set;i++){
+    p->result = (char*) malloc(p->line_per_thread * word_per_line * 64);
+    for(size_t i=0;i<p->line_per_thread;i++){
         strcat(p->result, "{\n");
         str_to_json(&p->result, p->line[i]);
         strcat(p->result, "},");
@@ -68,9 +71,9 @@ void get_fp(FILE** fp, const char* name , const char* mode){
 
 void inin_thread_obj(Param* param_obj, int thread_num){
     for(int i=0;i<thread_num;i++){
-        param_obj[i].line = new char* [line_per_thread];
-        for(size_t j=0;j<line_per_thread;j++)
-            param_obj[i].line[j] = (char*)malloc(1024*(sizeof(char)));
+        param_obj[i].line = new char* [max_line_per_thread];
+        for(size_t j=0;j<max_line_per_thread;j++)
+            param_obj[i].line[j] = (char*)malloc(line_size*(sizeof(char)));
     }
 }
 
@@ -86,7 +89,7 @@ int main(int argc, char* argv[]) {
     get_fp(&in_fp, "input.csv", "r");
     get_fp(&out_fp, "output.json", "w");
 
-    char line[1024];
+    char line[line_size];
     Param param_obj[thread_num];
     pthread_attr_t attr;
     pthread_t thread[thread_num];
@@ -97,20 +100,21 @@ int main(int argc, char* argv[]) {
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
     size_t line_idx = 0;
-    bool new_obj = true;
     size_t thread_idx = 0;
 
-    // convert now to string form
     fprintf(out_fp, "[");
 
     inin_thread_obj(param_obj, thread_num);
 
     while (fgets(line, sizeof(line), in_fp)) {
         assert(thread_idx < thread_num);
+        memset(param_obj[thread_idx].line[line_idx], 0, line_size);
         strcpy(param_obj[thread_idx].line[line_idx], line);
+
         line_idx++;
-        if(line_idx == line_per_thread){
-            param_obj[thread_idx].limit_set = line_per_thread;
+        // it would create a thread for processing n lines, where n=`line_per_thread`
+        if(line_idx == max_line_per_thread){
+            param_obj[thread_idx].line_per_thread = max_line_per_thread;
             rc = pthread_create(&thread[thread_idx], &attr, threaded_task, (void *)&param_obj[thread_idx]);
             if (rc) {
                 printf("ERROR: return code from pthread_create() is %d\n", rc);
@@ -118,9 +122,9 @@ int main(int argc, char* argv[]) {
             }
             thread_idx++;
             line_idx = 0; 
-            new_obj = true;
         }
 
+        // If the thread_idx equals to the thread_num, joining all threads and writing the results into the output file.`
         if(thread_idx == thread_num){
             for (size_t t = 0; t < thread_idx; t++) {
                 rc = pthread_join(thread[t], &status);
@@ -130,31 +134,27 @@ int main(int argc, char* argv[]) {
                 }
                 fprintf(out_fp, "%s", ((Param*)status)->result);
             }
-            // Handle the last remain datas which don'thread_idx meet the line_per_thread. 
-            if(!new_obj){
-                param_obj[thread_idx].limit_set = line_idx;
-                rc = pthread_create(&thread[thread_idx], &attr, threaded_task, (void *)&param_obj[thread_idx]);
-                if (rc) {
-                    printf("ERROR: return code from pthread_create() is %d\n", rc);
-                    exit(-1);
-                }
-                rc = pthread_join(thread[thread_idx], &status);
-                if (rc) {
-                    printf("ERROR; return code from pthread_join() is %d\n", rc);
-                    exit(-1);
-                }
-                fprintf(out_fp, "%s", ((Param*)status)->result);
-            }
             pthread_attr_destroy(&attr);
             thread_idx = 0;
             line_idx = 0;
-            new_obj = true;
         }
     }
 
-    if(thread_idx != thread_num){
-        for (size_t j = 0; j < thread_idx; j++) {
-            rc = pthread_join(thread[j], &status);
+    // Check if there are any remain lines that have not been processed yet.
+    if(line_idx != 0){
+        param_obj[thread_idx].line_per_thread = line_idx;
+        rc = pthread_create(&thread[thread_idx], &attr, threaded_task, (void *)&param_obj[thread_idx]);
+        if (rc) {
+            printf("ERROR: return code from pthread_create() is %d\n", rc);
+            exit(-1);
+        }
+        thread_idx++;
+    }
+
+    // Check if there are any remain threads that have not been joined yet.
+    if(thread_idx != 0){
+        for (size_t t = 0; t < thread_idx; t++) {
+            rc = pthread_join(thread[t], &status);
             if (rc) {
                 printf("ERROR; return code from pthread_join() is %d\n", rc);
                 exit(-1);
@@ -162,26 +162,11 @@ int main(int argc, char* argv[]) {
             fprintf(out_fp, "%s", ((Param*)status)->result);
         }
     }
-    if(!new_obj){
-
-        param_obj[thread_idx].limit_set = line_idx;
-        rc = pthread_create(&thread[thread_idx], &attr, threaded_task, (void *)&param_obj[thread_idx]);
-        if (rc) {
-            printf("ERROR: return code from pthread_create() is %d\n", rc);
-            exit(-1);
-        }
-        rc = pthread_join(thread[thread_idx], &status);
-        if (rc) {
-            printf("ERROR; return code from pthread_join() is %d\n", rc);
-            exit(-1);
-        }
-        fprintf(out_fp, "%s", ((Param*)status)->result);
-    }
     
-    // for(size_t i=0;i<thread_num;i++){
-    //     if(param_obj[i].result)
-    //         free(param_obj[i].result);
-    // }
+    for(size_t i=0;i<thread_num;i++){
+        if(param_obj[i].result)
+            free(param_obj[i].result);
+    }
 
     // For remove the redundant last comma
     size_t pos = ftell(out_fp);
